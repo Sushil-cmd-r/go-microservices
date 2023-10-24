@@ -1,28 +1,49 @@
 package main
 
 import (
-	"fmt"
-	"io"
+	"context"
+	"github.com/Sushil-cmd-r/go-microservices/handlers"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"time"
 )
 
 func main() {
-	http.HandleFunc("/", func(responseWriter http.ResponseWriter, request *http.Request) {
-		body, err := io.ReadAll(request.Body)
+	LOG := log.New(os.Stdout, "product-api ", log.LstdFlags)
+	helloHandler := handlers.NewHello(LOG)
+	goodbyeHandler := handlers.NewGoodbye(LOG)
+
+	serveMux := http.NewServeMux()
+	serveMux.Handle("/", helloHandler)
+	serveMux.Handle("/goodbye", goodbyeHandler)
+
+	server := &http.Server{
+		Addr:         "localhost:8080",
+		Handler:      serveMux,
+		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  1 * time.Second,
+		WriteTimeout: 1 * time.Second,
+	}
+
+	go func() {
+		LOG.Println("Server started on Port 8080\n")
+		err := server.ListenAndServe()
 		if err != nil {
-			http.Error(responseWriter, "Error Occurred", http.StatusBadRequest)
-			//responseWriter.WriteHeader(http.StatusBadRequest)
-			//val, _ := responseWriter.Write([]byte("Error Occurred"))
-			//fmt.Printf("Val: %d", val)
-			return
+			LOG.Fatal(err)
 		}
-		_, _ = fmt.Fprintf(responseWriter, "Hello %s\n", body)
-	})
+	}()
 
-	http.HandleFunc("/goodbye", func(responseWriter http.ResponseWriter, request *http.Request) {
-		log.Println("Bye World")
-	})
+	sigChannel := make(chan os.Signal)
+	signal.Notify(sigChannel, os.Interrupt)
+	signal.Notify(sigChannel, os.Kill)
 
-	_ = http.ListenAndServe("localhost:8080", nil)
+	sig := <-sigChannel
+	LOG.Println("Received terminate, Shutting down gracefully...", sig)
+
+	timeoutContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	_ = server.Shutdown(timeoutContext)
+	cancel()
+
 }
